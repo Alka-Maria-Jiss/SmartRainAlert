@@ -1,0 +1,11 @@
+.git/
+.gitignore
+.pio/
+.vscode/
+frontend/node_modules/
+frontend/dist/
+backend/venv/
+backend/__pycache__/
+backend/rain_data.db
+*.db
+

@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smart-rain-alert-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Directs SQLite database storage to mounted volume
+      - DATABASE_URL=sqlite:////app/data/rain_data.db
+    volumes:
+      # Persists SQLite database file on host (./backend/rain_data.db)
+      - ./backend:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+

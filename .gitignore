@@ -1,0 +1,69 @@
+# ==========================================
+# Private Hardware & Wi-Fi Secrets
+# ==========================================
+include/secrets.h
+secrets.h
+
+# ==========================================
+# Local Databases & Persistent Storage
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+backend/rain_data.db
+backend/test_server.log
+backend/stdout.log
+backend/stderr.log
+
+# ==========================================
+# Environment Variables & Private Keys
+# ==========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# ==========================================
+# Python Virtual Environments & Caches
+# ==========================================
+backend/venv/
+venv/
+.venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==========================================
+# Node.js & React Frontend Artifacts
+# ==========================================
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+.oxlint-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# PlatformIO & Embedded Builds
+# ==========================================
+.pio/
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# ==========================================
+# Operating System Temporary Files
+# ==========================================
+.DS_Store
+Thumbs.db
+Desktop.ini

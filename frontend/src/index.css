@@ -1,0 +1,69 @@
+:root {
+  --bg-cream: #F9F7F2;
+  --bg-card: #FFFFFF;
+  --bg-card-muted: #F3EFE6;
+  --bg-card-subtle: #F6F4EE;
+  
+  --text-primary: #1C241D;
+  --text-secondary: #5C685E;
+  --text-muted: #839185;
+  --text-light: #9DAAA0;
+  
+  --olive-dark: #2C3E2E;
+  --olive-forest: #384F3B;
+  --olive-primary: #4B6E4E;
+  --olive-medium: #5D8060;
+  --olive-light: #8FA891;
+  --olive-sage: #B4C5B6;
+  --olive-soft: #E8EFE8;
+  --olive-tint: #F1F5F1;
+  
+  --border-light: #E7E3D8;
+  --border-subtle: #EDEAE1;
+  --border-olive: #D4DFD5;
+  
+  --alert-red: #C73E1D;
+  --alert-red-bg: #FDEDEA;
+  --alert-red-border: #F7C6BC;
+  
+  --safe-green: #2B7A4B;
+  --safe-green-bg: #EAF5EE;
+  --safe-green-border: #BDDEC8;
+  
+  --shadow-sm: 0 1px 3px rgba(35, 45, 36, 0.04), 0 1px 2px rgba(35, 45, 36, 0.02);
+  --shadow-md: 0 4px 14px -2px rgba(35, 45, 36, 0.06), 0 2px 6px -1px rgba(35, 45, 36, 0.03);
+  --shadow-lg: 0 10px 25px -4px rgba(35, 45, 36, 0.08), 0 4px 10px -2px rgba(35, 45, 36, 0.04);
+  --shadow-xl: 0 20px 35px -6px rgba(35, 45, 36, 0.1), 0 6px 14px -3px rgba(35, 45, 36, 0.05);
+
+  --font-main: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--bg-cream);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  outline: none;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
