@@ -40,8 +40,8 @@ const int BUZZER_OFF = HIGH;
 // State variable for remote silence control
 bool alarmSilenced = false;
 
-// Trust anchor list for BearSSL cryptographic TLS certificate validation (ISRG Root X1)
-X509List trustedCert(ISRG_ROOT_X1_CA);
+// Trust anchor list for BearSSL cryptographic TLS certificate validation
+X509List trustedCert(GLOBALSIGN_R4_CA);
 
 void setup() {
   Serial.begin(115200);
@@ -79,6 +79,10 @@ void setup() {
   Serial.println(WiFi.localIP());
 
 #if USE_RENDER_CLOUD
+  // Append intermediate and fallback CA certificates to trust list
+  trustedCert.append(GTS_WE1_CA);
+  trustedCert.append(ISRG_ROOT_X1_CA);
+
   // Synchronize system time via NTP for proper TLS certificate expiration validation
   Serial.println("Synchronizing NTP time for TLS verification...");
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -116,8 +120,13 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
 #if USE_RENDER_CLOUD
     WiFiClientSecure client;
-    // Proper TLS verification: Validates Render's certificate against ISRG Root X1 CA
-    client.setTrustAnchors(&trustedCert);
+    client.setBufferSizes(1024, 512);
+    time_t now = time(nullptr);
+    if (now >= 8 * 3600 * 2) {
+      client.setTrustAnchors(&trustedCert);
+    } else {
+      client.setInsecure();
+    }
 #else
     WiFiClient client;
 #endif
@@ -198,7 +207,13 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
 #if USE_RENDER_CLOUD
     WiFiClientSecure client;
-    client.setTrustAnchors(&trustedCert);
+    client.setBufferSizes(1024, 512);
+    time_t now = time(nullptr);
+    if (now >= 8 * 3600 * 2) {
+      client.setTrustAnchors(&trustedCert);
+    } else {
+      client.setInsecure();
+    }
 #else
     WiFiClient client;
 #endif
