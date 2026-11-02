@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -7,259 +8,477 @@
 #include "secrets.h"
 #include "certs.h"
 
-// Pin connections
+// =====================================================
+// HARDWARE PINS
+// =====================================================
 const int rainPin = D5;
 const int buzzerPin = D1;
 const int redLED = D6;
 const int greenLED = D7;
 
-// Rain sensor logic
+// =====================================================
+// SENSOR AND BUZZER LOGIC
+// =====================================================
 const int RAIN_DETECTED = LOW;
-
-// Active-LOW buzzer logic
 const int BUZZER_ON = LOW;
 const int BUZZER_OFF = HIGH;
 
-// ==============================================================================
-// BACKEND TARGET CONFIGURATION
-// Set USE_RENDER_CLOUD to 1 to connect to Render Cloud backend over HTTPS
-// Set USE_RENDER_CLOUD to 0 for local laptop development over HTTP
-// ==============================================================================
+// =====================================================
+// BACKEND CONFIGURATION
+// =====================================================
 #define USE_RENDER_CLOUD 1
 
 #if USE_RENDER_CLOUD
-  // Render Cloud HTTPS endpoints (Update subdomain if different on Render)
-  const char* serverUrl = "https://smart-rain-backend.onrender.com/api/sensor-data";
-  const char* commandUrl = "https://smart-rain-backend.onrender.com/api/alarm/command";
+const char* serverUrl =
+    "https://smart-rain-backend.onrender.com/api/sensor-data";
+
+const char* commandUrl =
+    "https://smart-rain-backend.onrender.com/api/alarm/command";
 #else
-  // Local development endpoints (Local Laptop Wi-Fi IP)
-  const char* serverUrl = "http://10.97.246.66:8000/api/sensor-data";
-  const char* commandUrl = "http://10.97.246.66:8000/api/alarm/command";
+const char* serverUrl =
+    "http://10.97.246.66:8000/api/sensor-data";
+
+const char* commandUrl =
+    "http://10.97.246.66:8000/api/alarm/command";
 #endif
 
-// State variable for remote silence control
-bool alarmSilenced = false;
+// =====================================================
+// TIMING CONFIGURATION
+// =====================================================
+const unsigned long SENSOR_INTERVAL = 20;
+const unsigned long POST_INTERVAL = 3000;
+const unsigned long COMMAND_INTERVAL = 5000;
 
-// Trust anchor list for BearSSL cryptographic TLS certificate validation
+const unsigned long NETWORK_RETRY_INTERVAL = 2000;
+
+unsigned long lastSensorRead = 0;
+unsigned long lastPost = 0;
+unsigned long lastCommandCheck = 0;
+
+unsigned long lastNetworkRetry = 0;
+
+// =====================================================
+// GLOBAL VARIABLES
+// =====================================================
+int rainValue = HIGH;
+int previousRainValue = HIGH;
+
+bool alarmSilenced = false;
+bool urgentUpload = false;
+
+String rainStatus;
+String redStatus;
+String greenStatus;
+String buzzerStatus;
+
+// =====================================================
+// SSL CONFIGURATION
+// =====================================================
+#if USE_RENDER_CLOUD
+
 X509List trustedCert(GLOBALSIGN_R4_CA);
 
-void setup() {
-  Serial.begin(115200);
+void configureClient(WiFiClientSecure& client) {
 
-  pinMode(rainPin, INPUT);
+    client.setBufferSizes(1024, 512);
 
-  // Initialize buzzer in OFF state (Active-LOW: HIGH = OFF)
-  digitalWrite(buzzerPin, BUZZER_OFF);
-  pinMode(buzzerPin, OUTPUT);
+    time_t now = time(nullptr);
 
-  pinMode(redLED, OUTPUT);
-  pinMode(greenLED, OUTPUT);
-
-  // Initial output states
-  digitalWrite(buzzerPin, BUZZER_OFF);
-  digitalWrite(redLED, LOW);
-  digitalWrite(greenLED, HIGH);
-
-  Serial.println();
-  Serial.println("Smart Rain Alert System Started");
-
-  // Connect to Wi-Fi
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  Serial.print("Connecting to Wi-Fi");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.println("Wi-Fi Connected!");
-  Serial.print("NodeMCU IP Address: ");
-  Serial.println(WiFi.localIP());
-
-#if USE_RENDER_CLOUD
-  // Append intermediate and fallback CA certificates to trust list
-  trustedCert.append(GTS_WE1_CA);
-  trustedCert.append(ISRG_ROOT_X1_CA);
-
-  // Synchronize system time via NTP for proper TLS certificate expiration validation
-  Serial.println("Synchronizing NTP time for TLS verification...");
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  time_t now = time(nullptr);
-  int retry = 0;
-  while (now < 8 * 3600 * 2 && retry < 20) {
-    delay(500);
-    Serial.print(".");
-    now = time(nullptr);
-    retry++;
-  }
-  Serial.println();
-  if (now >= 8 * 3600 * 2) {
-    Serial.println("NTP Time synchronized. TLS Certificate verification active.");
-  } else {
-    Serial.println("NTP sync timed out; continuing...");
-  }
-#endif
+    if (now >= 8 * 3600 * 2) {
+        client.setTrustAnchors(&trustedCert);
+    } else {
+        Serial.println("WARNING: TLS certificate verification unavailable");
+        client.setInsecure();
+    }
 }
 
-void loop() {
-  // Read rain sensor
-  int rainValue = digitalRead(rainPin);
-
-  // Automatic Alarm Re-arming:
-  // If sensor detects dry conditions, reset silence state so future rain alarms trigger immediately
-  if (rainValue != RAIN_DETECTED) {
-    if (alarmSilenced) {
-      Serial.println("Condition: DRY -> Resetting alarm silence state (Re-armed).");
-    }
-    alarmSilenced = false;
-  }
-
-  // Check backend for remote alarm commands if Wi-Fi is connected
-  if (WiFi.status() == WL_CONNECTED) {
-#if USE_RENDER_CLOUD
-    WiFiClientSecure client;
-    client.setBufferSizes(1024, 512);
-    time_t now = time(nullptr);
-    if (now >= 8 * 3600 * 2) {
-      client.setTrustAnchors(&trustedCert);
-    } else {
-      client.setInsecure();
-    }
 #else
-    WiFiClient client;
+
+void configureClient(WiFiClient& client) {
+}
+
 #endif
 
-    HTTPClient httpCmd;
+// =====================================================
+// UPDATE LED AND BUZZER
+// =====================================================
+void updateHardware() {
 
-    // Set a short timeout (2000ms) to prevent blocking
-    httpCmd.setTimeout(2000);
-    httpCmd.begin(client, commandUrl);
+    if (rainValue == RAIN_DETECTED) {
 
-    int cmdCode = httpCmd.GET();
-    if (cmdCode == 200) {
-      String cmdPayload = httpCmd.getString();
-      // Check if backend instructed to silence alarm
-      if (cmdPayload.indexOf("\"silence_alarm\":true") >= 0 || cmdPayload.indexOf("\"command\":\"SILENCE\"") >= 0) {
-        if (!alarmSilenced && rainValue == RAIN_DETECTED) {
-          Serial.println(">> Remote Silence Command Received: Silencing buzzer!");
+        rainStatus = "RAIN";
+
+        redStatus = "ON";
+        greenStatus = "OFF";
+
+        digitalWrite(redLED, HIGH);
+        digitalWrite(greenLED, LOW);
+
+        if (alarmSilenced) {
+
+            buzzerStatus = "OFF";
+            digitalWrite(buzzerPin, BUZZER_OFF);
+
+        } else {
+
+            buzzerStatus = "ON";
+            digitalWrite(buzzerPin, BUZZER_ON);
         }
-        if (rainValue == RAIN_DETECTED) {
-          alarmSilenced = true;
-        }
-      } else if (cmdPayload.indexOf("\"silence_alarm\":false") >= 0 || cmdPayload.indexOf("\"command\":\"NORMAL\"") >= 0) {
-        if (rainValue != RAIN_DETECTED) {
-          alarmSilenced = false;
-        }
-      }
-    }
-    httpCmd.end();
-  }
 
-  // Determine LED and Buzzer states based on sensor and silence status
-  String rainStatus;
-  String redStatus;
-  String greenStatus;
-  String buzzerStatus;
-
-  if (rainValue == RAIN_DETECTED) {
-    // Rain detected
-    rainStatus = "RAIN";
-    redStatus = "ON";
-    greenStatus = "OFF";
-
-    // LEDs strictly controlled by actual sensor readings
-    digitalWrite(redLED, HIGH);
-    digitalWrite(greenLED, LOW);
-
-    // Buzzer controlled by rain + remote silence command
-    if (alarmSilenced) {
-      buzzerStatus = "OFF";
-      digitalWrite(buzzerPin, BUZZER_OFF); // Active-LOW: HIGH = OFF
-      Serial.println("RAIN DETECTED - ALARM SILENCED (BUZZER OFF) - RED LED ON");
     } else {
-      buzzerStatus = "ON";
-      digitalWrite(buzzerPin, BUZZER_ON);  // Active-LOW: LOW = ON
-      Serial.println("RAIN DETECTED - BUZZER ON - RED LED ON");
+
+        rainStatus = "NO RAIN";
+
+        redStatus = "OFF";
+        greenStatus = "ON";
+        buzzerStatus = "OFF";
+
+        digitalWrite(redLED, LOW);
+        digitalWrite(greenLED, HIGH);
+        digitalWrite(buzzerPin, BUZZER_OFF);
+
+        // Re-arm alarm when dry
+        alarmSilenced = false;
     }
+}
 
-  } else {
-    // No rain detected (Dry)
-    rainStatus = "NO RAIN";
-    redStatus = "OFF";
-    greenStatus = "ON";
-    buzzerStatus = "OFF";
-    alarmSilenced = false; // Re-arm alarm
+// =====================================================
+// READ SENSOR AND DETECT STATE CHANGES
+// =====================================================
+void readRainSensor() {
 
-    // Hardware outputs for dry condition
-    digitalWrite(buzzerPin, BUZZER_OFF); // Active-LOW: HIGH = OFF
-    digitalWrite(redLED, LOW);
-    digitalWrite(greenLED, HIGH);
+    int newValue = digitalRead(rainPin);
 
-    Serial.println("NO RAIN - BUZZER OFF - GREEN LED ON");
-  }
+    if (newValue != rainValue) {
 
-  Serial.print("Sensor value: ");
-  Serial.println(rainValue);
+        rainValue = newValue;
 
-  // Send sensor data to FastAPI backend
-  if (WiFi.status() == WL_CONNECTED) {
-#if USE_RENDER_CLOUD
-    WiFiClientSecure client;
-    client.setBufferSizes(1024, 512);
-    time_t now = time(nullptr);
-    if (now >= 8 * 3600 * 2) {
-      client.setTrustAnchors(&trustedCert);
+        // Update hardware immediately
+        updateHardware();
+
+        // Request immediate cloud upload
+        urgentUpload = true;
+
+        Serial.println("--------------------------------");
+        Serial.println("RAIN SENSOR STATE CHANGED!");
+        Serial.print("New sensor value: ");
+        Serial.println(rainValue);
+        Serial.print("Rain status: ");
+        Serial.println(rainStatus);
+        Serial.println("--------------------------------");
+
     } else {
-      client.setInsecure();
+
+        rainValue = newValue;
     }
-#else
-    WiFiClient client;
-#endif
+}
+
+// =====================================================
+// CHECK REMOTE ALARM COMMAND
+// =====================================================
+template <typename TClient>
+void checkRemoteCommand(TClient& client) {
 
     HTTPClient http;
 
-    http.setTimeout(3000);
-    http.begin(client, serverUrl);
+    http.setTimeout(1500);
+
+    if (!http.begin(client, commandUrl)) {
+        Serial.println("Command connection failed");
+        return;
+    }
+
+    int code = http.GET();
+
+    if (code == 200) {
+
+        String payload = http.getString();
+
+        if (
+            payload.indexOf("\"silence_alarm\":true") >= 0 ||
+            payload.indexOf("\"command\":\"SILENCE\"") >= 0
+        ) {
+
+            if (rainValue == RAIN_DETECTED) {
+
+                alarmSilenced = true;
+
+                updateHardware();
+
+                Serial.println("Remote silence command received");
+            }
+
+        } else if (
+            payload.indexOf("\"silence_alarm\":false") >= 0 ||
+            payload.indexOf("\"command\":\"NORMAL\"") >= 0
+        ) {
+
+            if (rainValue == RAIN_DETECTED) {
+
+                alarmSilenced = false;
+
+                updateHardware();
+            }
+        }
+
+    } else {
+
+        Serial.print("Command HTTP response: ");
+        Serial.println(code);
+    }
+
+    http.end();
+}
+
+// =====================================================
+// SEND SENSOR DATA
+// =====================================================
+template <typename TClient>
+void sendSensorData(TClient& client) {
+
+    HTTPClient http;
+
+    http.setTimeout(2000);
+
+    if (!http.begin(client, serverUrl)) {
+
+        Serial.println("Backend connection failed");
+        return;
+    }
+
     http.addHeader("Content-Type", "application/json");
 
     String jsonData = "{";
+
     jsonData += "\"device_id\":\"NodeMCU\",";
     jsonData += "\"sensor_value\":" + String(rainValue) + ",";
     jsonData += "\"rain_status\":\"" + rainStatus + "\",";
     jsonData += "\"buzzer_status\":\"" + buzzerStatus + "\",";
     jsonData += "\"red_led_status\":\"" + redStatus + "\",";
     jsonData += "\"green_led_status\":\"" + greenStatus + "\"";
+
     jsonData += "}";
 
-    Serial.println("Sending data to backend...");
+    int code = http.POST(jsonData);
 
-    int httpCode = http.POST(jsonData);
+    Serial.print("Backend response code: ");
+    Serial.println(code);
 
-    if (httpCode > 0) {
-      Serial.print("Backend response code: ");
-      Serial.println(httpCode);
-      String responseBody = http.getString();
-      Serial.println(responseBody);
+    if (code > 0) {
 
-      // Dual update: If POST response contains silence command and rain is active, apply immediately
-      if (rainValue == RAIN_DETECTED && responseBody.indexOf("\"silence_alarm\":true") >= 0) {
-        alarmSilenced = true;
-        digitalWrite(buzzerPin, BUZZER_OFF);
-      }
+        String response = http.getString();
+
+        Serial.println(response);
+
+        // Read silence state from POST response if supplied.
+        // This does not replace the separate command endpoint.
+        if (
+            response.indexOf("\"silence_alarm\":true") >= 0 &&
+            rainValue == RAIN_DETECTED
+        ) {
+
+            alarmSilenced = true;
+            updateHardware();
+
+        } else if (
+            response.indexOf("\"silence_alarm\":false") >= 0 &&
+            rainValue == RAIN_DETECTED
+        ) {
+
+            alarmSilenced = false;
+            updateHardware();
+        }
+
     } else {
-      Serial.print("HTTP request failed: ");
-      Serial.println(http.errorToString(httpCode));
+
+        Serial.println(http.errorToString(code));
     }
 
     http.end();
+}
 
-  } else {
-    Serial.println("Wi-Fi disconnected!");
-    WiFi.reconnect();
-  }
+// =====================================================
+// SETUP
+// =====================================================
+void setup() {
 
-  // Wait 2 seconds before next reading
-  delay(2000);
+    Serial.begin(115200);
+
+    pinMode(rainPin, INPUT);
+    pinMode(buzzerPin, OUTPUT);
+    pinMode(redLED, OUTPUT);
+    pinMode(greenLED, OUTPUT);
+
+    digitalWrite(buzzerPin, BUZZER_OFF);
+    digitalWrite(redLED, LOW);
+    digitalWrite(greenLED, HIGH);
+
+    Serial.println();
+    Serial.println("SMART RAIN ALERT SYSTEM STARTED");
+
+    // Connect Wi-Fi
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    Serial.print("Connecting to Wi-Fi");
+
+    while (WiFi.status() != WL_CONNECTED) {
+
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println();
+    Serial.println("Wi-Fi Connected!");
+
+    Serial.println(WiFi.localIP());
+
+#if USE_RENDER_CLOUD
+
+    trustedCert.append(GTS_WE1_CA);
+    trustedCert.append(ISRG_ROOT_X1_CA);
+
+    Serial.println("Synchronizing NTP time...");
+
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    time_t now = time(nullptr);
+
+    int retry = 0;
+
+    while (now < 8 * 3600 * 2 && retry < 30) {
+
+        delay(500);
+
+        now = time(nullptr);
+
+        retry++;
+    }
+
+    if (now >= 8 * 3600 * 2) {
+
+        Serial.println("NTP synchronized");
+
+    } else {
+
+        Serial.println("NTP synchronization timed out");
+        Serial.println("TLS fallback will be used");
+    }
+
+#endif
+
+    // Initial sensor reading
+    rainValue = digitalRead(rainPin);
+
+    updateHardware();
+
+    previousRainValue = rainValue;
+
+    unsigned long currentTime = millis();
+
+    lastSensorRead = currentTime;
+    lastPost = currentTime;
+    lastCommandCheck = currentTime;
+
+    Serial.println("System ready!");
+}
+
+// =====================================================
+// MAIN LOOP
+// =====================================================
+void loop() {
+
+    unsigned long currentTime = millis();
+
+    // 1. READ SENSOR FIRST
+    if (currentTime - lastSensorRead >= SENSOR_INTERVAL) {
+
+        lastSensorRead = currentTime;
+
+        readRainSensor();
+    }
+
+    // 2. HANDLE WI-FI CONNECTION
+    if (WiFi.status() != WL_CONNECTED) {
+
+        if (currentTime - lastNetworkRetry >= NETWORK_RETRY_INTERVAL) {
+
+            lastNetworkRetry = currentTime;
+
+            Serial.println("Wi-Fi disconnected. Reconnecting...");
+
+            WiFi.reconnect();
+        }
+
+        yield();
+
+        return;
+    }
+
+    // 3. URGENT UPLOAD AFTER SENSOR STATE CHANGE
+    if (urgentUpload) {
+
+        urgentUpload = false;
+
+#if USE_RENDER_CLOUD
+
+        WiFiClientSecure client;
+
+#else
+
+        WiFiClient client;
+
+#endif
+
+        configureClient(client);
+
+        sendSensorData(client);
+
+        lastPost = millis();
+    }
+
+    // 4. PERIODIC SENSOR DATA UPLOAD
+    currentTime = millis();
+
+    if (currentTime - lastPost >= POST_INTERVAL) {
+
+        lastPost = currentTime;
+
+#if USE_RENDER_CLOUD
+
+        WiFiClientSecure client;
+
+#else
+
+        WiFiClient client;
+
+#endif
+
+        configureClient(client);
+
+        sendSensorData(client);
+    }
+
+    // 5. CHECK REMOTE SILENCE COMMAND
+    currentTime = millis();
+
+    if (currentTime - lastCommandCheck >= COMMAND_INTERVAL) {
+
+        lastCommandCheck = currentTime;
+
+#if USE_RENDER_CLOUD
+
+        WiFiClientSecure client;
+
+#else
+
+        WiFiClient client;
+
+#endif
+
+        configureClient(client);
+
+        checkRemoteCommand(client);
+    }
+
+    yield();
 }
