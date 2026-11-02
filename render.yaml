@@ -29,17 +29,12 @@ services:
           name: smart-rain-db
           property: connectionString
       - key: FRONTEND_URL
-        fromService:
-          name: smart-rain-dashboard
-          type: web
-          property: host
+        value: https://smart-rain-dashboard.onrender.com
 
   # Render Free Static Site - React Vite Dashboard
   - type: web
     name: smart-rain-dashboard
     runtime: static
-    plan: free
-    region: oregon
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
@@ -48,9 +43,8 @@ services:
         fromService:
           name: smart-rain-backend
           type: web
-          property: host
+          property: url
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
-

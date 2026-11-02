@@ -38,7 +38,11 @@ import './App.css'
 // Determine API base URL dynamically
 const getApiBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL.replace(/\/+$/, '')
+    let url = import.meta.env.VITE_API_URL.trim().replace(/\/+$/, '')
+    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`
+    }
+    return url
   }
   // If running via Vite dev server on port 5173, use Vite proxy
   if (window.location.port === '5173') {
