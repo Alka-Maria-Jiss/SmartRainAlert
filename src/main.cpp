@@ -25,7 +25,7 @@ const int BUZZER_OFF = HIGH;
 // Set USE_RENDER_CLOUD to 1 to connect to Render Cloud backend over HTTPS
 // Set USE_RENDER_CLOUD to 0 for local laptop development over HTTP
 // ==============================================================================
-#define USE_RENDER_CLOUD 0
+#define USE_RENDER_CLOUD 1
 
 #if USE_RENDER_CLOUD
   // Render Cloud HTTPS endpoints (Update subdomain if different on Render)
@@ -117,7 +117,7 @@ void loop() {
 #if USE_RENDER_CLOUD
     WiFiClientSecure client;
     // Proper TLS verification: Validates Render's certificate against ISRG Root X1 CA
-    client.setTrustAnchor(&trustedCert);
+    client.setTrustAnchors(&trustedCert);
 #else
     WiFiClient client;
 #endif
@@ -198,7 +198,7 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
 #if USE_RENDER_CLOUD
     WiFiClientSecure client;
-    client.setTrustAnchor(&trustedCert);
+    client.setTrustAnchors(&trustedCert);
 #else
     WiFiClient client;
 #endif
