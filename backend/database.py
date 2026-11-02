@@ -11,10 +11,12 @@ DEFAULT_DB_PATH = os.path.join(BASE_DIR, "rain_data.db")
 raw_db_url = os.getenv("DATABASE_URL")
 
 if raw_db_url:
-    # Render Free PostgreSQL provides URLs starting with 'postgres://'
-    # SQLAlchemy 2.0 requires the dialect prefix 'postgresql://'
+    # Render Free PostgreSQL provides URLs starting with 'postgres://' or 'postgresql://'
+    # SQLAlchemy requires explicit DBAPI driver prefix for psycopg2: 'postgresql+psycopg2://'
     if raw_db_url.startswith("postgres://"):
-        DATABASE_URL = raw_db_url.replace("postgres://", "postgresql://", 1)
+        DATABASE_URL = raw_db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif raw_db_url.startswith("postgresql://") and not raw_db_url.startswith("postgresql+"):
+        DATABASE_URL = raw_db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
     else:
         DATABASE_URL = raw_db_url
 else:

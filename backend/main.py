@@ -13,12 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 
-try:
-    from database import engine, Base, SessionLocal
-    import models
-except ImportError:
-    from .database import engine, Base, SessionLocal
-    from . import models
+from database import engine, Base, SessionLocal
+import models
 
 # Create database tables if they do not exist
 Base.metadata.create_all(bind=engine)
